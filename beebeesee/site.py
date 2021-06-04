@@ -1,11 +1,21 @@
+from datetime import datetime
 import json
+import os
 from pathlib import Path
 from typing import *
-import cv2
-from flask import Blueprint, render_template, request, flash, redirect, url_for
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    flash,
+    redirect,
+    url_for,
+    session
+)
 from werkzeug.utils import secure_filename
-from .brain import predict
+from .brain import predict, open_image
 from .info import PRE_PATH, PROJECT_NAME, STATIC_DIR, VIEWS_DIR, UPLOAD_DIR
+from .util.raw_processing import image_from_base64
 
 site = Blueprint("site", PROJECT_NAME, template_folder=VIEWS_DIR)
 
@@ -35,39 +45,60 @@ def signup():
 """
 
 
-@site.route("/analyzer", methods=['GET', 'POST'])
-def analyzer():
+@site.route("/old/analyzer", methods=['GET', 'POST'])
+def old_analyzer():
     ALLOWED_EXTS: Set[str] = {".png", ".jpg", ".jpeg"}
     def file_check(filename: str) -> bool:
         p = Path(filename)
         return p.suffix in ALLOWED_EXTS
     if request.method == "POST":
-        print(request)
-        print(request.files)
         if "myfile" not in request.files:
-            print("myfile not in request.files")
             flash("No file part.")
             return redirect(request.url)
         file = request.files["myfile"]
         if file.filename == "":
-            print("file.filename == ''")
             flash("No selected file.")
             return redirect(request.url)
         ok = file_check(file.filename)
         print(file, ok)
         if file and file_check(file.filename):
-            print("file and file_check(file.filename)")
             filename = secure_filename(file.filename)
             end_path = UPLOAD_DIR / filename
             file.save(end_path)
-            emotion = predict(end_path)
-            print(f"PREDICTED_EMOTION: {emotion}")
-            return redirect(url_for("site.success"))
+            emotion = predict(open_image(end_path))
+            session["analyzer_emotion"] = emotion
+            os.remove(end_path)
+            return redirect(url_for("site.analyzer_success"))
         else:
             return redirect(request.url)
     elif request.method == "GET":
-        return render_template("analyzer.html")
+        return render_template("analyzer-old.html")
 
+
+@site.route("/analyzer", methods=['GET', 'POST'])
+def analyzer():
+    if request.method == "GET":
+        return render_template("analyzer.html")
+    elif request.method == "POST":
+        data = request.data
+        image = image_from_base64(data)
+        filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S.png")
+        filepath = UPLOAD_DIR / filename
+        with filepath.open("wb") as f:
+            f.write(image)
+        emotion = predict(open_image(filepath))
+        session["analyzer_emotion"] = emotion
+        os.remove(filepath)
+        return redirect(url_for("site.analyzer_success"))
+
+
+@site.route("/analyzer/success", methods=["GET"])
+def analyzer_success():
+    if "analyzer_emotion" not in session:
+        return redirect(url_for("site.lostpage", lost="you-idiot"))
+    emotion = session["analyzer_emotion"]
+    session.pop("analyzer_emotion")
+    return render_template("analyzer-success.html", emotion=emotion)
 
 
 @site.route("/__backdoor/videofeed", methods=["POST"])
