@@ -1,5 +1,5 @@
 @echo OFF
 
-python -m beebeesee
+py -3.7 beebeesee
 
 @echo ON
